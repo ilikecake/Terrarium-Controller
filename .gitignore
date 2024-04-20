@@ -1,3 +1,7 @@
+#Circuit python specific stuff
+settings.toml
+secrets.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
