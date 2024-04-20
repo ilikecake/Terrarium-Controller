@@ -20,7 +20,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+lib/*.mpy
+lib/*/*.mpy
 lib64/
 parts/
 sdist/
