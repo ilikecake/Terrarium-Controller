@@ -1,7 +1,7 @@
 #Circuit python specific stuff
 settings.toml
 secrets.py
-boot_out.py
+boot_out.txt
 log.txt
 
 # Byte-compiled / optimized / DLL files
