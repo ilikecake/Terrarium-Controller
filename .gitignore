@@ -1,6 +1,8 @@
 #Circuit python specific stuff
 settings.toml
 secrets.py
+boot_out.py
+log.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
