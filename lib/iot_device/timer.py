@@ -12,15 +12,22 @@ class timer:
 
     def AddOutput(self, OutputToAdd):
         #TODO: check if output is already in the list, make sure output is a string.
-        self._OutputList.append(OutputToAdd)
-        self._OutputList.sort() #TODO: I dont think I need this.
+        if not isinstance(OutputToAdd, str):
+            raise TypeError("Output name must be a string")
+        
+        if OutputToAdd not in self._OutputList:
+            self._OutputList.append(OutputToAdd)
+            self._OutputList.sort() #TODO: I dont think I need this.
+        else:
+            #Not sure if we want to raise this error here. We could fail silently and eveything 
+            #would probably work. However, attempting to add an output twice is probably an error
+            #that the user would want to know about.
+            raise ValueError(f"{OutputToAdd} is already in the list")
         
     def DisplayOutputs(self):
         print(self._OutputList)
         
     def AddEvent(self, EventToAdd):
-        #TODO: Do not allow events at 00:00 <--- not needed, but we should check for calculated events.
-        
         #Make sure the event has a 'time' key
         if not ('time' in EventToAdd):
             raise NameError("The key 'time' must be in the dictionary")
@@ -40,10 +47,71 @@ class timer:
         elif not isinstance(EventToAdd['time'], time_obj):
             #We are not given either a time or time_struct object.
             raise TypeError('Time must be a time or time_struct object')
+        
+        #Check to see if the event time we are trying to add is already in the list.
+        #If so, update the current event with the new states.
+        for event in self._EventList:
+            if event['time'] == EventToAdd['time']:
+                for key, value in EventToAdd.items():
+                    event[key] = value
+                #If we are updating an exsisting event, the list is already sorted.
+                #Must call this to rebuild the calculated events.
+                self.GenerateEventTable()
+                return
+
+        #If the event time is not currently in the list, add a new event and resort the list.
         self._EventList.append(EventToAdd)
         self._EventList.sort(key=lambda val: val['time'])
         
-    def ShowEventList(self, ShowRaw = False):
+        #Must call this to rebuild the calculated events.
+        self.GenerateEventTable()
+    
+    
+    def RemoveEvent(self, EventToRemove):
+        #Make sure the event has a 'time' key
+        if not ('time' in EventToRemove):
+            raise NameError("The key 'time' must be in the dictionary")
+        
+        #Check if there are keys in the event that don't correspond to outputs. If so, raise an 
+        #error. Probably not needed for removing an event, but if this happens, it is probably an 
+        #name error, so we should highlight that.
+        UnknownItems = [k for k in EventToRemove.keys() if k not in self._OutputList]
+        if len(UnknownItems) > 1:
+            UnknownItems.remove('time')
+            raise ValueError(f"Unknown item(s) in event: {UnknownItems}")
+        
+        #Make sure time is in the right format. We can support time or time_struct.
+        if isinstance(EventToRemove['time'], time.struct_time):
+            #We are given a time in time_struct format. Sorting of time_struct objects is not 
+            #supported. Convert to a time object.
+            TimeToAdd = time_obj(EventToRemove['time'].tm_hour, EventToRemove['time'].tm_min)
+            EventToRemove['time'] = TimeToAdd
+        elif not isinstance(EventToRemove['time'], time_obj):
+            #We are not given either a time or time_struct object.
+            raise TypeError('Time must be a time or time_struct object')
+        
+        #Look for the event in the list
+        for event in self._EventList:
+            if event['time'] == EventToRemove['time']:
+                for eventName in EventToRemove:
+                    #Remove keys from the event
+                    if eventName is not 'time':
+                        event.pop(eventName, None)
+                if (len(event) < 2) and (event['time'] is not time_obj(0,0)):
+                    #If all the keys for this event other than 'time' are removed. Remove the entire
+                    #event from the list. Note that we don't want to do this for the 00:00 event.
+                    self._EventList.remove(event)
+        
+        #Must call this to rebuild the calculated events.
+        self.GenerateEventTable()
+                
+    '''
+    Covenience function to output the event table in a human readable format.
+     - ShowCalc: Set to True to show calculated events in the table
+     - ShowRaw : Set to True to instead print the raw event list
+    '''
+    #TODO: Show AM/PM
+    def ShowEventList(self, ShowCalc = False, ShowRaw = False):
         NameLength = 4
         ValLength = 7
         
@@ -56,8 +124,6 @@ class timer:
                         NameLength = len(key)
             
             NameLength = NameLength+1
-            
-            EventTimes = [k['time'] for k in self._EventList]
             EventNameStr = '{:<'+str(NameLength)+'}|'
             ValStr = '{: ^'+str(ValLength)+'}|'
             line = EventNameStr.format('time')
@@ -79,7 +145,10 @@ class timer:
                 for event in self._EventList:
                     try:
                         if event[output]['type'] == 'calc':
-                            line = line + ValStr.format(' ')
+                            if ShowCalc:
+                                line = line + ValStr.format(event[output]['value'])
+                            else:
+                                line = line + ValStr.format(' ')
                         else:
                             #TODO: In the future we can probably add other if/else statements here to handle more complicated events.
                             line = line + ValStr.format(event[output]['value'])
@@ -91,37 +160,44 @@ class timer:
     def GenerateEventTable(self):
         #TODO: Handle if either the output list or event list is blank.
         #TODO: What do we do if something is in the output list but not in the event list, what about the opposite?
-        #TODO: Handle repeated events
         #TODO: WHat if an output is in the output list but not in any events?
-        #print("Event List:")
-        #print(self._EventList)
         
         #Find the last entry for each output. This becomes the starting state for each output.
         for Output in self._OutputList:
-            #print("Output to search: ", Output)
+            try:
+                self._EventList[0][Output]['type']
+            except KeyError as e:
+                #e is 'type' if the event exsists but does not have a 'type' key.
+                #e is equal to Output if the output does not exsist.
+                if str(e) == "type":
+                    #There is an event at time 0,0 that is not calculated. Leave this alone.
+                    continue                    
+        
             for event in reversed(self._EventList):
                 #print(event)
                 try:
                     DictFound = event[Output]
-                    #Note: without the copy command, the next line will link the dictionaries by reference, which we don't want
+                    #Note: without the copy command, the next line will link the dictionaries by reference, which we don't want here.
                     self._EventList[0][Output] = DictFound.copy()  
                     self._EventList[0][Output]['type'] = 'calc'
-                    #print(DictFound)
                     break
                 except KeyError:
                     pass
-                    #print("not found")
+                
+                try:
+                    self._EventList[0][Output]
+                except KeyError:
+                    self._EventList[0][Output] = {"value": False}   #TODO: This sets to the state to false if there are no entries in the event table. Is this right?
+                    self._EventList[0][Output]['type'] = 'calc'
+
         
         i = 0
         for event in self._EventList:
             if i > 0:
                 for Output in self._OutputList:
-                    #print("Event: ", event)
-                    #print("Output: ", Output)
                     try:
                         if event[Output]['type'] == 'calc':
                             #Event found, but it is a calculated event. Update it from the previous event.
-                            #print("Output type calc, copying previous")
                             event[Output] = self._EventList[i-1][Output].copy()
                             event[Output]['type'] = 'calc'
                     except KeyError as e:
@@ -129,13 +205,9 @@ class timer:
                         #e is equal to Output if the output does not exsist.
                         if str(e) != "type":
                             #Event not found. Add a calculated event to make state determination easier.
-                            #print("Output not present, copying previous")
                             event[Output] = self._EventList[i-1][Output].copy()
                             event[Output]['type'] = 'calc'
             i = i+1
-    
-        #print("Final Event List:")
-        #print(self._EventList)
         
     def GetCurrentState(self, TheTime):
         if isinstance(TheTime, time.struct_time):
