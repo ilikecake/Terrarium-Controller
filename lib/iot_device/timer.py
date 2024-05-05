@@ -164,33 +164,52 @@ class timer:
         
         #Find the last entry for each output. This becomes the starting state for each output.
         for Output in self._OutputList:
+            #Step through each output on the list.
+            
+            #This block is meant to check if any events at time 0 are 'real'. If this is true, 
+            # skip the rest of this loop.
             try:
-                self._EventList[0][Output]['type']
+                if self._EventList[0][Output]['type'] != 'calc':
+                    #There is an event at time 0 that is not calculated. Leave this alone.
+                    continue
             except KeyError as e:
                 #e is 'type' if the event exsists but does not have a 'type' key.
                 #e is equal to Output if the output does not exsist.
                 if str(e) == "type":
-                    #There is an event at time 0,0 that is not calculated. Leave this alone.
+                    #There is an event at time 0 that is not calculated. Leave this alone.
                     continue                    
-        
+            
+            #Step through each event in the table in reverse order. Look for the first real event.
+            EventFound = False
             for event in reversed(self._EventList):
-                #print(event)
                 try:
                     DictFound = event[Output]
-                    #Note: without the copy command, the next line will link the dictionaries by reference, which we don't want here.
-                    self._EventList[0][Output] = DictFound.copy()  
-                    self._EventList[0][Output]['type'] = 'calc'
-                    break
-                except KeyError:
+                    if DictFound['type'] != 'calc':
+                        #Found a non-calculated event. Copy it to time 0.
+                        self._EventList[0][Output] = DictFound.copy()  
+                        self._EventList[0][Output]['type'] = 'calc'
+                        EventFound = True
+                        break
+                except KeyError as e:
+                    #e is 'type' if the event exsists but does not have a 'type' key.
+                    #e is equal to Output if the output does not exsist.
+                    if str(e) == "type":
+                        #Output exsists, but does not have a 'type' key. This is a real event.
+                        self._EventList[0][Output] = DictFound.copy()  
+                        self._EventList[0][Output]['type'] = 'calc'
+                        EventFound = True
+                        break
                     pass
                 
-                try:
-                    self._EventList[0][Output]
-                except KeyError:
-                    self._EventList[0][Output] = {"value": False}   #TODO: This sets to the state to false if there are no entries in the event table. Is this right?
-                    self._EventList[0][Output]['type'] = 'calc'
+            #Deal with the case where there is an output on the list but no events associated with it.
+            if not EventFound:
+                self._EventList[0][Output] = {"value": False}   #TODO: This sets to the state to false if there are no entries in the event table. Is this right?
+                self._EventList[0][Output]['type'] = 'calc'
 
-        
+        #Now that we have fully populated the time 0 event, we can step through all the rest of
+        # the events and determine what all the outputs should be at that time. We add or update
+        # events to each time so that we always have all outputs at each even. If we add an event
+        # that is not given by the user, we give it type 'calc'.
         i = 0
         for event in self._EventList:
             if i > 0:

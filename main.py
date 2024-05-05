@@ -8,6 +8,7 @@ import rtc
 import json #TODO: Get rid of this eventually?
 import supervisor #TODO: Get rid of this eventually?
 import storage
+import gc
 
 #import circuitpython_schedule as schedule
 
@@ -50,6 +51,7 @@ timer_dev = timer.timer()
 timer_dev.AddOutput("heatlamp")
 timer_dev.AddOutput("uv")
 timer_dev.AddOutput("led")
+timer_dev.AddOutput("tstat")
 #timer_dev.DisplayOutputs()
 
 blart = time.struct_time((0,0,0,13,44,0,0,0,0))
@@ -73,7 +75,8 @@ timer_dev.AddEvent({"time": time_obj(11, 45), "heatlamp":{"value": True}})
 timer_dev.AddEvent({"time": time_obj(9, 45),  "heatlamp":{"value": True},  "led":{"value": False}})
 timer_dev.RemoveEvent({"time": time_obj(9, 45),  "heatlamp":{"value": True},  "uv":{"value": True}})
 
-
+timer_dev.AddEvent({"time": time_obj(9, 15), "tstat":{"value": 82}})
+timer_dev.AddEvent({"time": time_obj(18, 45), "tstat":{"value": 72}})
 
 #timer_dev.ShowEventList(ShowRaw = True)
 timer_dev.ShowEventList()
@@ -87,7 +90,7 @@ timer_dev.ShowEventList(ShowCalc = True)
 #print("21:00:", timer_dev.GetCurrentState(time_obj(21, 0)))
 
 #print('blarg')
-time.sleep(300)
+time.sleep(3)
 #---------------------------------------------------------------------------------------------------
 #I2C Devices
 # *0x20 - PCAL9555 IO Expander
@@ -101,7 +104,7 @@ time.sleep(300)
 #  This catches the error. Maybe instead do a few dummy reads right after initialization of the device?
 #def DS18x20_GetTemp(dev):
 #    try:
-#        temp = dev.temperature
+#        temp = dev.temperature 
 #    except RuntimeError:
 #        print("CRC Error getting temp")
 #        temp = 0
@@ -634,28 +637,37 @@ for NowState in NowStates:
 
 ThermostatSetpoint = 80
 
+
+gc.collect()
+print("Free Memory:", gc.mem_free(), "bytes")
+
 while True:
     now = time.localtime()
 
     if now.tm_min != OldMin:
         OldMin = now.tm_min
-        print("Loop : ", i)
-        print(f"{now.tm_mon:02d}/{now.tm_mday:02d}/{now.tm_year:04d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}" )
         IOT_dev.CaptureData()
+        NowStates = timer_dev.GetCurrentState(now)
+        
+        #Debug outputs
+        print("--------------")
+        print(f"{now.tm_mon:02d}/{now.tm_mday:02d}/{now.tm_year:04d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}" )
+        print("Current State: ", NowStates)
         #IOT_dev.PrintSensorValues()
         
-
+        #Handle thermostat functions. TODO: should this be in the IOT class?
         ThermostatTemp = IOT_dev.GetSensorValue("ds_temp_1")
         print("TSTAT Temp: ", ThermostatTemp)
-        if ThermostatTemp is None:
+        if (ThermostatTemp is None) or (NowStates['tstat']['value'] is False):
+            #We don't have a temp from the temp sensor, or the event is false. Turn off the heater.
             Relays[3].value = False
-        elif ThermostatTemp > ThermostatSetpoint:
+        elif ThermostatTemp > NowStates['tstat']['value']:
+            #Temperature above setpoint, turn off heater.
             Relays[3].value = False
         else:
+            #Temperature below setpoint, turn on heater.
             Relays[3].value = True
 
-        NowStates = timer_dev.GetCurrentState(now)
-        print("Current State: ", NowStates)
         Relays[1].value = NowStates['heatlamp']['value']
         Relays[0].value = NowStates['uv']['value']
         if NowStates['led']['value']:
@@ -667,14 +679,10 @@ while True:
             LED_HS.value = False
             LED_LS.duty_cycle = 0
         
+        #TODO: Relay updates in this loop won't show up when we call SendSensorValues on this iteration.
+        # This is because they are determined when CaptureData is called before the relays are updated. 
+        # The data sent to the MQTT server may be delayed by 1 min. Do I care?
         IOT_dev.SendSensorValues()
-        #if i>60:
-        #    LED_HS.value = True
-        #    LED_LS.duty_cycle = 65535
-        #    Relays[0].value = True
-        #    Relays[1].value = True
-        #if i>120:
-        #    Relays[3].value = True
 
     time.sleep(.2)
 #---------------------------------------------------------------------------------------------------
